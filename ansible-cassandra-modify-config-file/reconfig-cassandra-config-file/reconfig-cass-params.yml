@@ -1,0 +1,147 @@
+#!/usr/bin/env ansible-playbook
+
+#
+# Usage: 
+#./reconfig-cass-params.yml -vvv -u "cloud-user" -R cassandra -e {'"host_name":"10.139.47.31","cassandra_install_dir":"/opt/cassandra/apache-cassandra-3.0.11", "cassandra_user_name":"cassandra", "cassandra_group_name":"cassandra"'}
+#
+#
+# Use this playbook to update parameters in cassandra.yaml file on remote hosts.
+
+- name: Update configuration on remote nodes 
+  hosts: "{{host_name}}"
+
+# Change these variables as per your requirements 
+  vars:
+#    - cassandra_dir: /opt/cassandra/apache-cassandra-3.0.11
+    - cassandra_dir: "{{cassandra_install_dir}}"
+    - config_file: cassandra.yaml
+    - cassandra_user: "{{cassandra_user_name}}"
+    - cassandra_group: "{{cassandra_group_name}}"
+
+# Dictionary contains list of parameters that we want to update on remote nodes. 
+# Defining a dictionary allows this play to update multiple parameters in one go. Once cassandra.yaml has been updated, the play restarts Cassandra service. 
+  vars_files:
+    - parameters_list.yml 
+
+  tasks:
+ 
+ # List of parameters that require users to carry out additional steps before the new settings come into effect.   
+    - set_fact:
+        restricted_params: ['cluster_name','num_tokens','listen_address','listen_interface','seed_provider','seeds','broadcast_address','rpc_address']
+       
+    - set_fact: time_stamp="{{lookup('pipe','date +%d%m%y%H%M%S')}}"
+ 
+ # Commands to rollback files in case there's an issue.    
+    - set_fact:
+        rollback_command:
+          - 'mv {{cassandra_dir}}/conf/{{config_file}} {{cassandra_dir}}/conf/{{config_file}}.old_invalid.{{time_stamp}}'
+          - 'mv {{cassandra_dir}}/conf/{{config_file}}.{{time_stamp}}.bak {{cassandra_dir}}/conf/{{config_file}}'
+
+    - name: Commence block 
+      block:
+        - name: Backup existing config file on remote nodes
+          copy:
+            src: "{{cassandra_dir}}/conf/{{config_file}}" 
+            dest: "{{cassandra_dir}}/conf/{{config_file}}.{{time_stamp}}.bak"
+            remote_src: True
+            mode: 0644
+            owner: "{{cassandra_user}}"
+            group: "{{cassandra_group}}"
+          become: True
+      
+      # This task updates values for the parameters that are already enabled. 
+        - lineinfile:
+            path: "{{cassandra_dir}}/conf/{{config_file}}"
+            state: present
+            regexp: '^{{ item.value.parameter_name }}'
+            line: '{{ item.value.parameter_name }}: {{ item.value.parameter_value }}'
+          with_dict: "{{ parameter_list }}"
+          when: (item.value.parameter_name not in restricted_params) and not (item.value.parameter_name | search("#"))
+          become: True
+          notify: restart-services
+      
+      # This task updates value for a given parameter that was previously commented out #. 
+      # This task will un-comment the parameter thereby enabling it. 
+        - lineinfile:
+            path: "{{cassandra_dir}}/conf/{{config_file}}"
+            state: present
+            regexp: '^{{ item.value.parameter_name }}'
+            line: "{{ item.value.parameter_name | regex_replace(' ','') | regex_replace('#','')}}: {{ item.value.parameter_value }}"
+          with_dict: "{{ parameter_list }}"
+          when: (item.value.parameter_name not in restricted_params) and (item.value.parameter_name | search("#"))
+          become: True
+          notify: restart-services
+
+        - name: Ensuring cassandra configuration is protected
+          file:
+            path: "{{cassandra_dir}}/conf/{{config_file}}"
+            state: file
+            mode: 0600
+            owner: "{{cassandra_user}}"
+            group: "{{cassandra_group}}"
+          become: True  
+          
+      rescue:
+        - name: Rollback in case there's a failure.
+          command: '{{rollback_command}}'
+          args:
+            executable: /bin/bash
+          become: True
+
+  handlers:
+
+# This section of the playbook will only run if changes are made to cassandra.yml file. 
+    
+# This part of the playbook is used for identifying if Cassandra is running as a service or a standalone process. Depending upon the outcome of various checks, playbook will either issue a restart service 
+# command or simply kill and then start cassandra 
+
+    # Command for checking in case Cassandra process is running or not.
+    - set_fact: check_pid="ps -ef | grep cassandra | grep "org.apache.cassandra.service.CassandraDaemon" | grep -v grep"
+      listen: restart-services
+     
+    # Check if the Cassandra process exists or not? Capture return code. 
+    - name: Check if Cassandra process is running or not
+      shell: "{{check_pid}}"
+      register: check_pid_rc
+      ignore_errors: Yes
+      listen: restart-services
+    
+    # Capture return code
+    - set_fact: check_pid_rc_returncode={{check_pid_rc.rc}}
+      listen: restart-services
+
+    - debug: msg={{check_pid_rc_returncode}}
+
+
+    # Check if Cassandra is running as a service and capture return code. 
+    - name: Check if cassandra is configured to run as a service
+      command: systemctl status cassandra
+      register: svc_cassandra
+      ignore_errors: Yes
+      listen: restart-services
+
+    - set_fact: svc_cassandra_return_code={{svc_cassandra.rc}}
+      listen: restart-services
+    
+    # Use this task to restart Cassandra if it's running as a service. This will run if Cassandra process exists and service status check returns error code 0. If the conditions are false, then this 
+    # task will be skipped. 
+    - set_fact: restart_cassandra_service="{{cassandra_dir}}/bin/nodetool flush && systemctl status cassandra"
+      listen: restart-services
+
+    - name: Use this to restart Cassandra if it's running as a process 
+      command: "{{restart_cassandra_service}}"
+      when: check_pid_rc_returncode == "0" and svc_cassandra_return_code == "0"
+      become: True
+      listen: restart-services
+
+    # Use this task to restart Cassandra if it is running as a standalone process.
+    - set_fact: restart_cass_standalone_process="{{cassandra_dir}}/bin/nodetool flush && ps -ef | grep cassandra | grep "org.apache.cassandra.service.CassandraDaemon" | grep -v grep | awk {'print $2'} | xargs kill && sleep 30 && {{cassandra_dir}}/bin/cassandra > /dev/null 2>&1 &"
+      listen: restart-services
+
+    - name: Use this to restart Cassandra if it's running as a standalone process 
+      shell: "{{restart_cass_standalone_process}}" 
+      async: 180
+      poll: 60
+      when: check_pid_rc_returncode == "0" and svc_cassandra_return_code != "0"
+      become: True
+      listen: restart-services
