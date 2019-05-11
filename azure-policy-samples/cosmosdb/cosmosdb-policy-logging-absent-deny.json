@@ -1,0 +1,29 @@
+{
+    "mode": "All",
+    "policyRule": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.DocumentDB/databaseAccounts"
+          }
+        ]
+    },
+        "if": {
+        "anyOf": [
+          {
+            "field": "Microsoft.Insights/diagnosticSettings/logs.enabled",
+            "equals": "false"
+          },
+          {
+            "field": "Microsoft.Insights/diagnosticSettings/metrics.enabled",
+            "equals": "false"
+          }
+        ]
+      },
+      "then": {
+        "effect": "Deny"
+      }
+    },
+    "parameters": {}
+  }
