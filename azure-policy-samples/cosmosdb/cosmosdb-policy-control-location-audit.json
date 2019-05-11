@@ -1,0 +1,25 @@
+
+  {
+    "mode": "All",
+    "policyRule": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.DocumentDB/databaseAccounts"
+          },
+          {
+            "not": {
+              "field": "Microsoft.DocumentDB/databaseAccounts/locations[*].locationName",
+              "in": ["East US", "East US 2"]
+            }
+          }
+        ]
+      },
+      "then": {
+        "effect": "audit"
+      }
+    },
+    "parameters": {}
+  }
+
