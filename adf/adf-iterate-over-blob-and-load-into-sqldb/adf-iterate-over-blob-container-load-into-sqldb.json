@@ -1,0 +1,88 @@
+{
+    "name": "TestForEachPipeline",
+    "properties": {
+        "activities": [
+            {
+                "name": "ForEach1",
+                "type": "ForEach",
+                "dependsOn": [
+                    {
+                        "activity": "Get Metadata1",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "typeProperties": {
+                    "items": {
+                        "value": "@activity('Get Metadata1').output.childItems",
+                        "type": "Expression"
+                    },
+                    "isSequential": true,
+                    "activities": [
+                        {
+                            "name": "Copy Data1",
+                            "type": "Copy",
+                            "policy": {
+                                "timeout": "7.00:00:00",
+                                "retry": 0,
+                                "retryIntervalInSeconds": 30,
+                                "secureOutput": false,
+                                "secureInput": false
+                            },
+                            "typeProperties": {
+                                "source": {
+                                    "type": "BlobSource",
+                                    "recursive": false
+                                },
+                                "sink": {
+                                    "type": "SqlSink",
+                                    "writeBatchSize": 10000,
+                                    "preCopyScript": "truncate table stg.west"
+                                },
+                                "enableStaging": false,
+                                "dataIntegrationUnits": 0
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "WestBlob1",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "file_name": "@item().name"
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "stgWest",
+                                    "type": "DatasetReference"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "Get Metadata1",
+                "type": "GetMetadata",
+                "policy": {
+                    "timeout": "7.00:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "typeProperties": {
+                    "dataset": {
+                        "referenceName": "WestBlobForEach",
+                        "type": "DatasetReference"
+                    },
+                    "fieldList": [
+                        "childItems"
+                    ]
+                }
+            }
+        ]
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}
