@@ -1,21 +1,29 @@
-  {
-    "mode": "All",
-    "policyRule": {
-      "if": {
-        "allOf": [
+"policyRule": {
+  "if": {
+    "allOf": [
+      {
+        "field": "type",
+        "equals": "Microsoft.DocumentDB/databaseAccounts"
+      },
+      {
+        "anyOf": [
           {
-            "field": "type",
-            "equals": "Microsoft.DocumentDB/databaseAccounts"
+            "field": "Microsoft.DocumentDB/databaseAccounts/virtualNetworkRules[*]",
+            "exists": "false"
           },
           {
-            "field": "Microsoft.DocumentDB/databaseAccounts/isVirtualNetworkFilterEnabled",
+            "field": "Microsoft.DocumentDB/databaseAccounts/virtualNetworkRules[*]",
+            "notLike": "*"
+          },
+          {
+            "field": "Microsoft.DocumentDB/databaseAccounts/virtualNetworkRules[*].ignoreMissingVNetServiceEndpoint",
             "equals": "false"
           }
         ]
-      },
-      "then": {
-        "effect": "audit"
       }
-    },
-    "parameters": {}
+    ]
+  },
+  "then": {
+    "effect": "audit"
   }
+}
